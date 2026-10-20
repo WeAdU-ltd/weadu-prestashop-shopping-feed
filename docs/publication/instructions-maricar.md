@@ -54,7 +54,7 @@
 ### Règles du forum à respecter
 
 - Joignez le ZIP du module au premier message : c'est ce que demandent ces sections.
-- Liens externes : l'en-tête des sections n'autorise un autre lien que s'il pointe directement vers le module **et** si votre compte compte au moins 100 messages sur le forum. Si votre compte en compte moins de 100, supprimez la ligne « Code source : LINK » du message français (le message anglais ne contient pas de lien).
+- Liens externes : l'en-tête des sections n'autorise un autre lien que s'il pointe directement vers le module **et** si votre compte totalise au moins 100 messages sur le forum. Si votre compte en totalise moins de 100, supprimez la ligne « Code source : LINK » du message français (le message anglais ne contient pas de lien).
 - Aucun lien vers une boutique, la page d'accueil d'une place de marché ou le site de WeAdU dans le message. Le module et sa page GitHub suffisent.
 - Le forum n'est pas un espace publicitaire : gardez le texte factuel, tel qu'il est rédigé.
 - N'envoyez jamais de message privé aux membres pour présenter le module.
