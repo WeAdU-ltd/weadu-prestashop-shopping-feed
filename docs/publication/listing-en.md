@@ -19,7 +19,7 @@ A free module that checks, in the back office, the catalogue fields Google Shopp
 
 The module does not modify your products, calls neither Google nor any other service, and sends no data. A product with no finding is not an approval from Google.
 
-Declared compatibility: PrestaShop 1.7.8 and later. MIT licence. Made by WeAdU.
+Declared compatibility: PrestaShop 1.7.8 and later. AFL-3.0 licence. Made by WeAdU.
 
 ## Limits
 

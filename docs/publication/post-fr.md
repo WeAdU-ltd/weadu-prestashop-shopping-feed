@@ -24,7 +24,7 @@ Je partage un module gratuit qui vérifie, dans le back-office, les champs du ca
 
 **Installation** : Modules → Gestionnaire de modules → Installer un module → choisir le ZIP joint, puis « Configurer ».
 
-Compatibilité déclarée : PrestaShop 1.7.8 et suivantes. Licence MIT. Code source : LINK
+Compatibilité déclarée : PrestaShop 1.7.8 et suivantes. Licence AFL-3.0. Code source : LINK
 
 Transparence : je travaille chez WeAdU, l'agence qui a conçu ce module. Il est gratuit.
 

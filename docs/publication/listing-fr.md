@@ -19,7 +19,7 @@ Module gratuit qui vérifie, dans le back-office, les champs du catalogue utilis
 
 Le module ne modifie pas vos produits, n'appelle ni Google ni aucun autre service, et n'envoie aucune donnée. Un produit sans constat n'est pas validé pour autant par Google.
 
-Compatibilité déclarée : PrestaShop 1.7.8 et versions suivantes. Licence MIT. Conçu par WeAdU.
+Compatibilité déclarée : PrestaShop 1.7.8 et versions suivantes. Licence AFL-3.0. Conçu par WeAdU.
 
 ## Limites à connaître
 

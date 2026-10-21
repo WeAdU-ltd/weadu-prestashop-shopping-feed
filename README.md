@@ -73,7 +73,7 @@ sh test.sh   # PHP syntax check, shared logic tests, and module tests (PHP and N
 
 ## License
 
-[MIT](LICENSE)
+[AFL-3.0](LICENSE)
 
 ## About
 

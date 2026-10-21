@@ -24,7 +24,7 @@ I'd like to share a free module that checks, in the back office, the catalogue f
 
 **Installation**: Modules → Module Manager → Upload a module → select the attached ZIP, then "Configure".
 
-Declared compatibility: PrestaShop 1.7.8 and later. MIT licence.
+Declared compatibility: PrestaShop 1.7.8 and later. AFL-3.0 licence.
 
 Disclosure: I work at WeAdU, the agency that made this module. It is free.
 
