@@ -107,7 +107,7 @@ class Weadushoppingfeed extends Module
         $prefix = _DB_PREFIX_;
         $isbn = $this->columnExists('product', 'isbn') ? 'p.isbn' : "'' AS isbn";
         $mpn = $this->columnExists('product', 'mpn') ? 'p.mpn' : "'' AS mpn";
-        $condition = $this->columnExists('product', 'condition') ? 'p.condition' : "'new' AS condition";
+        $condition = $this->columnExists('product', 'condition') ? 'p.`condition`' : "'new' AS `condition`";
         $sql = 'SELECT p.id_product, p.reference, ps.price, p.ean13, p.upc, ' . $isbn . ', ' . $mpn . ', ' . $condition . ',
                 pl.name, pl.description, pl.description_short, pl.link_rewrite, m.name AS brand
             FROM `' . $prefix . 'product` p
