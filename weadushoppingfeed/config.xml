@@ -3,7 +3,7 @@
     <name>weadushoppingfeed</name>
     <displayName><![CDATA[WeAdU Shopping feed check]]></displayName>
     <version><![CDATA[1.0.0]]></version>
-    <description><![CDATA[Checks catalog fields used by Google Shopping. Local only.]]></description>
+    <description><![CDATA[Checks catalog fields used by Google Shopping: title, GTIN, price, image, brand. Local only.]]></description>
     <author><![CDATA[WeAdU]]></author>
     <tab><![CDATA[administration]]></tab>
     <is_configurable>1</is_configurable>
