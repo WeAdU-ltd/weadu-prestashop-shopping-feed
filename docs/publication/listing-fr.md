@@ -23,6 +23,6 @@ Compatibilité déclarée : PrestaShop 1.7.8 et versions suivantes. Licence AFL-
 
 ## Limites à connaître
 
-- Le prix vérifié est le prix de base hors taxes, sans déclinaison ni prix spécifique.
+- Le prix vérifié est le prix TTC de chaque déclinaison, avec le prix soldé quand un prix spécifique s'applique (calculé pour le groupe client par défaut).
 - La disponibilité suit la quantité en stock de la boutique courante.
 - Le GTIN est lu dans l'EAN-13, puis l'UPC, puis l'ISBN.

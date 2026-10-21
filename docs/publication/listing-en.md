@@ -23,6 +23,6 @@ Declared compatibility: PrestaShop 1.7.8 and later. AFL-3.0 licence. Made by WeA
 
 ## Limits
 
-- The price checked is the base price, tax excluded, without combinations or specific prices.
+- The price checked is the tax-included price of each combination, with the sale price when a specific price applies (computed for the default customer group).
 - Availability follows the stock quantity of the current shop.
 - The GTIN is read from the EAN-13, then the UPC, then the ISBN.

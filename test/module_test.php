@@ -34,6 +34,15 @@ class Db
     public $rows = array();
     public $combos = array();
     public $comboQueries = array();
+    public $comboImages = array();
+    public function getValue($sql)
+    {
+        $this->queries[] = $sql;
+        if (preg_match('/product_attribute_image.*id_product_attribute = (\\d+)/s', $sql, $m)) {
+            return isset($this->comboImages[(int) $m[1]]) ? $this->comboImages[(int) $m[1]] : false;
+        }
+        return false;
+    }
     public $columns = array('isbn' => true, 'mpn' => true, 'condition' => true);
     public static function getInstance() { if (!self::$instance) { self::$instance = new Db(); } return self::$instance; }
     public function executeS($sql)
@@ -249,6 +258,11 @@ check('no stock is out_of_stock', $row2['availability'] === 'out_of_stock');
 $c7 = $map->invoke($module, $rows[2], Db::getInstance()->combos[4][0], 'EUR', 1, 1);
 check('combination link targets the combination', $c7['link'] === 'https://shop.example/4-7-tee.html', $c7['link']);
 check('combination GTIN, stock, group id', $c7['gtin'] === '4006381333948' && $c7['availability'] === 'in_stock' && $c7['item_group_id'] === '4');
+check('combination without its own image uses the product cover', $c7['image_link'] === 'https://shop.example/12-large/tee.jpg', $c7['image_link']);
+Db::getInstance()->comboImages = array(7 => 31);
+$c7i = $map->invoke($module, $rows[2], Db::getInstance()->combos[4][0], 'EUR', 1, 1);
+check('combination image is used when it exists', $c7i['image_link'] === 'https://shop.example/31-large/tee.jpg', $c7i['image_link']);
+Db::getInstance()->comboImages = array();
 check('combination sale price', $c7['price'] === '24.00 EUR' && $c7['sale_price'] === '19.20 EUR');
 $c8 = $map->invoke($module, $rows[2], Db::getInstance()->combos[4][1], 'EUR', 1, 1);
 check('combination MPN wins, product GTIN is the fallback (none here)', $c8['mpn'] === 'T-1-M' && $c8['gtin'] === '' && $c8['availability'] === 'out_of_stock');
@@ -305,5 +319,11 @@ foreach (array_unique($mm[1]) as $str) {
     if (!isset($_MODULE['<{weadushoppingfeed}prestashop>weadushoppingfeed_' . md5($str)])) { $missing[] = $str; }
 }
 check('every English string has a French translation', !$missing, implode(' | ', $missing));
+
+// --- upgrade 1.1.0 -------------------------------------------------------------
+require __DIR__ . '/../weadushoppingfeed/upgrade/upgrade-1.1.0.php';
+Configuration::$values = array('WEADU_SF_SOURCE' => 'g', 'WEADU_SF_MEDIUM' => 'c', 'WEADU_SF_CAMPAIGN' => 's', 'WEADU_SF_LIMIT' => '120');
+check('upgrade 1.1.0 succeeds', upgrade_module_1_1_0($module) === true);
+check('upgrade 1.1.0 removes the UTM settings and keeps the limit', Configuration::$values === array('WEADU_SF_LIMIT' => '120'));
 
 finish();

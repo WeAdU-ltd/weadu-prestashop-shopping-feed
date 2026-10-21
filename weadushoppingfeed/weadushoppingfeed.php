@@ -213,9 +213,13 @@ class Weadushoppingfeed extends Module
             $idPa
         );
         $image = '';
-        $cover = Image::getCover($idProduct);
-        if (is_array($cover) && !empty($cover['id_image'])) {
-            $image = (string) $this->context->link->getImageLink($row['link_rewrite'], (int) $cover['id_image']);
+        $idImage = $idPa ? $this->combinationImage($idPa) : 0;
+        if (!$idImage) {
+            $cover = Image::getCover($idProduct);
+            $idImage = (is_array($cover) && !empty($cover['id_image'])) ? (int) $cover['id_image'] : 0;
+        }
+        if ($idImage) {
+            $image = (string) $this->context->link->getImageLink($row['link_rewrite'], $idImage);
             $image = $this->absoluteUrl($image);
         }
         return array(
@@ -235,6 +239,16 @@ class Weadushoppingfeed extends Module
             'identifier_exists' => '',
             'edit_link' => $this->editLink($idProduct),
         );
+    }
+
+    // First image attached to the combination, or 0 when the combination has none (the product cover is used then).
+    private function combinationImage($idPa)
+    {
+        $sql = 'SELECT pai.id_image FROM `' . _DB_PREFIX_ . 'product_attribute_image` pai
+            LEFT JOIN `' . _DB_PREFIX_ . 'image` i ON i.id_image = pai.id_image
+            WHERE pai.id_product_attribute = ' . (int) $idPa . ' AND pai.id_image > 0
+            ORDER BY i.position ASC, pai.id_image ASC';
+        return (int) Db::getInstance()->getValue($sql);
     }
 
     private function editLink($idProduct)
@@ -350,7 +364,8 @@ class Weadushoppingfeed extends Module
         return 'en';
     }
 
-    // Native PrestaShop translations (translations/fr.php), editable in the back office.
+    // Translations come from the legacy file translations/fr.php, read by $this->l() at runtime.
+    // The back-office translation editor only lists strings passed literally to l(), so these strings are not listed there.
     private function t($english)
     {
         return html_entity_decode($this->l($english, 'weadushoppingfeed'), ENT_QUOTES, 'UTF-8');

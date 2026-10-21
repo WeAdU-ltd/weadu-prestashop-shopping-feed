@@ -19,7 +19,7 @@ I'd like to share a free module that checks, in the back office, the catalogue f
 
 **What it does not do**
 - It does not modify your products and sends nothing to Google or anywhere else.
-- The price checked is the base price, tax excluded, without combinations or specific prices.
+- The price checked is the tax-included price of each combination, with the sale price when a specific price applies (computed for the default customer group).
 - A product with no finding is not an approval from Google.
 
 **Installation**: Modules → Module Manager → Upload a module → select the attached ZIP, then "Configure".
