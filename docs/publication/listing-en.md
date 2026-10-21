@@ -13,7 +13,7 @@ A free module that checks, in the back office, the catalogue fields Google Shopp
 - Reads the active products of the current shop, in the back-office language (200 products by default, 500 at most).
 - Flags, for each product, errors (empty title, description, link, image, availability, or price; title over 150 characters; price of zero; GTIN with an invalid length or check digit; duplicate reference) and warnings (short title, all-capitals title, promotional wording, price without currency, empty brand, empty GTIN and MPN, empty or unknown condition).
 - Suggests a title that starts with the brand when the brand is missing from the title.
-- Optionally adds your UTM parameters to the links it checks.
+- Checks each combination, with tax-included and sale prices, and an edit link per product.
 - Exports the result as CSV.
 - Interface in English and French.
 

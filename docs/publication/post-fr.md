@@ -14,7 +14,7 @@ Je partage un module gratuit qui vérifie, dans le back-office, les champs du ca
 - Lit les produits actifs de la boutique (200 par défaut, 500 au maximum).
 - Signale par produit : titre, description, lien, image, disponibilité ou prix vides ; titre de plus de 150 caractères ; prix nul ; GTIN dont la clé de contrôle est fausse ; référence en double. En avertissement : titre court ou tout en capitales, formule promotionnelle, prix sans devise, marque vide, GTIN et MPN vides.
 - Propose un titre qui commence par la marque quand elle manque.
-- Ajoute vos paramètres UTM aux liens vérifiés, si vous le souhaitez.
+- Contrôle chaque déclinaison, avec prix TTC et prix soldés, et un lien de modification par produit.
 - Exporte le résultat en CSV.
 
 **Ce qu'il ne fait pas**

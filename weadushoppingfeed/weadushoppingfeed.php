@@ -19,32 +19,29 @@ class Weadushoppingfeed extends Module
     {
         $this->name = 'weadushoppingfeed';
         $this->tab = 'administration';
-        $this->version = '1.0.0';
+        $this->version = '1.1.0';
         $this->author = 'WeAdU';
         $this->need_instance = 0;
         $this->bootstrap = true;
         parent::__construct();
-        $this->displayName = 'WeAdU Shopping feed check';
-        $this->description = 'Checks catalog fields used by Google Shopping: title, GTIN, price, image, brand. Local only.';
+        $this->displayName = $this->l('WeAdU Shopping feed check');
+        $this->description = $this->l('Checks catalog fields used by Google Shopping: title, GTIN, price, image, brand. Local only.');
         $this->ps_versions_compliancy = array('min' => '1.7.8.0', 'max' => _PS_VERSION_);
-        $this->confirmUninstall = $this->t('Remove the saved UTM settings?');
     }
 
     public function install()
     {
         return parent::install()
-            && Configuration::updateValue('WEADU_SF_SOURCE', '')
-            && Configuration::updateValue('WEADU_SF_MEDIUM', '')
-            && Configuration::updateValue('WEADU_SF_CAMPAIGN', '')
             && Configuration::updateValue('WEADU_SF_LIMIT', '200');
     }
 
     public function uninstall()
     {
+        Configuration::deleteByName('WEADU_SF_LIMIT');
+        // Settings from 1.0.0, removed with the UTM option.
         Configuration::deleteByName('WEADU_SF_SOURCE');
         Configuration::deleteByName('WEADU_SF_MEDIUM');
         Configuration::deleteByName('WEADU_SF_CAMPAIGN');
-        Configuration::deleteByName('WEADU_SF_LIMIT');
         return parent::uninstall();
     }
 
@@ -63,9 +60,6 @@ class Weadushoppingfeed extends Module
 
     private function saveSettings()
     {
-        $source = trim((string) Tools::getValue('weadu_source'));
-        $medium = trim((string) Tools::getValue('weadu_medium'));
-        $campaign = trim((string) Tools::getValue('weadu_campaign'));
         $limit = (int) Tools::getValue('weadu_limit');
         if ($limit < 1) {
             $limit = 200;
@@ -73,20 +67,6 @@ class Weadushoppingfeed extends Module
         if ($limit > 500) {
             $limit = 500;
         }
-        if ($source !== '' || $medium !== '' || $campaign !== '') {
-            $built = WeaduFeedAudit::buildUtmUrl(array(
-                'url' => 'https://example.com/',
-                'source' => $source,
-                'medium' => $medium,
-                'campaign' => $campaign,
-            ));
-            if (!$built['ok']) {
-                return $this->alert('error', $this->t('UTM values were not saved. Use letters, digits, and . _ ~ - with no spaces.'));
-            }
-        }
-        Configuration::updateValue('WEADU_SF_SOURCE', $source);
-        Configuration::updateValue('WEADU_SF_MEDIUM', $medium);
-        Configuration::updateValue('WEADU_SF_CAMPAIGN', $campaign);
         Configuration::updateValue('WEADU_SF_LIMIT', (string) $limit);
         return $this->alert('success', $this->t('Settings saved.'));
     }
@@ -97,7 +77,17 @@ class Weadushoppingfeed extends Module
         if ($limit < 1 || $limit > 500) {
             $limit = 200;
         }
-        return WeaduFeedAudit::auditItems($this->collectItems($limit), $limit);
+        $items = $this->collectItems($limit);
+        $report = WeaduFeedAudit::auditItems($items, $limit);
+        $report['extra'] = array();
+        foreach ($items as $i => $item) {
+            $report['extra'][$i] = array(
+                'price' => $item['price'],
+                'sale_price' => $item['sale_price'],
+                'edit_link' => $item['edit_link'],
+            );
+        }
+        return $report;
     }
 
     private function collectItems($limit)
@@ -108,7 +98,7 @@ class Weadushoppingfeed extends Module
         $isbn = $this->columnExists('product', 'isbn') ? 'p.isbn' : "'' AS isbn";
         $mpn = $this->columnExists('product', 'mpn') ? 'p.mpn' : "'' AS mpn";
         $condition = $this->columnExists('product', 'condition') ? 'p.`condition`' : "'new' AS `condition`";
-        $sql = 'SELECT p.id_product, p.reference, ps.price, p.ean13, p.upc, ' . $isbn . ', ' . $mpn . ', ' . $condition . ',
+        $sql = 'SELECT p.id_product, p.reference, p.ean13, p.upc, ' . $isbn . ', ' . $mpn . ', ' . $condition . ',
                 pl.name, pl.description, pl.description_short, pl.link_rewrite, m.name AS brand
             FROM `' . $prefix . 'product` p
             INNER JOIN `' . $prefix . 'product_shop` ps
@@ -128,78 +118,129 @@ class Weadushoppingfeed extends Module
         if (isset($this->context->currency->iso_code)) {
             $currency = (string) $this->context->currency->iso_code;
         }
-        $source = trim((string) Configuration::get('WEADU_SF_SOURCE'));
-        $medium = trim((string) Configuration::get('WEADU_SF_MEDIUM'));
-        $campaign = trim((string) Configuration::get('WEADU_SF_CAMPAIGN'));
         $items = array();
         foreach ($rows as $row) {
-            $items[] = $this->mapRow($row, $currency, $idLang, $idShop, $source, $medium, $campaign);
+            $combinations = $this->combinations((int) $row['id_product'], $idLang, $idShop);
+            if (!$combinations) {
+                $combinations = array(null);
+            }
+            foreach ($combinations as $combination) {
+                if (count($items) >= $limit) {
+                    return $items;
+                }
+                $items[] = $this->mapRow($row, $combination, $currency, $idLang, $idShop);
+            }
         }
         return $items;
     }
 
-    private function mapRow($row, $currency, $idLang, $idShop, $source, $medium, $campaign)
+    // One row per combination of the product in this shop, with its attribute names.
+    private function combinations($idProduct, $idLang, $idShop)
     {
-        $id = trim((string) $row['reference']);
+        $prefix = _DB_PREFIX_;
+        $isbn = $this->columnExists('product_attribute', 'isbn') ? 'pa.isbn' : "'' AS isbn";
+        $mpn = $this->columnExists('product_attribute', 'mpn') ? 'pa.mpn' : "'' AS mpn";
+        $sql = 'SELECT pa.id_product_attribute, pa.reference, pa.ean13, pa.upc, ' . $isbn . ', ' . $mpn . ',
+                GROUP_CONCAT(al.name ORDER BY ag.position, a.position SEPARATOR \', \') AS attributes
+            FROM `' . $prefix . 'product_attribute` pa
+            INNER JOIN `' . $prefix . 'product_attribute_shop` pas
+                ON pas.id_product_attribute = pa.id_product_attribute AND pas.id_shop = ' . (int) $idShop . '
+            LEFT JOIN `' . $prefix . 'product_attribute_combination` pac
+                ON pac.id_product_attribute = pa.id_product_attribute
+            LEFT JOIN `' . $prefix . 'attribute` a
+                ON a.id_attribute = pac.id_attribute
+            LEFT JOIN `' . $prefix . 'attribute_group` ag
+                ON ag.id_attribute_group = a.id_attribute_group
+            LEFT JOIN `' . $prefix . 'attribute_lang` al
+                ON al.id_attribute = pac.id_attribute AND al.id_lang = ' . (int) $idLang . '
+            WHERE pa.id_product = ' . (int) $idProduct . '
+            GROUP BY pa.id_product_attribute
+            ORDER BY pa.id_product_attribute ASC';
+        $rows = Db::getInstance()->executeS($sql);
+        return is_array($rows) ? $rows : array();
+    }
+
+    private function mapRow($row, $combination, $currency, $idLang, $idShop)
+    {
+        $idProduct = (int) $row['id_product'];
+        $idPa = $combination ? (int) $combination['id_product_attribute'] : 0;
+        $productRef = trim((string) $row['reference']);
+        $id = $combination ? trim((string) $combination['reference']) : '';
+        // A combination often copies the product reference: keep ids unique per combination.
+        if ($id === '' || ($combination && $id === $productRef)) {
+            $id = $productRef;
+            if ($id !== '' && $combination) {
+                $id .= '-' . $idPa;
+            }
+        }
         if ($id === '') {
-            $id = (string) (int) $row['id_product'];
+            $id = $combination ? $idProduct . '-' . $idPa : (string) $idProduct;
+        }
+        $title = (string) $row['name'];
+        if ($combination && trim((string) $combination['attributes']) !== '') {
+            $title .= ' - ' . $combination['attributes'];
         }
         $description = (string) $row['description'];
         if (trim(strip_tags($description)) === '') {
             $description = (string) $row['description_short'];
         }
         $gtin = '';
-        foreach (array('ean13', 'upc', 'isbn') as $key) {
-            $candidate = isset($row[$key]) ? preg_replace('/\s+/', '', (string) $row[$key]) : '';
-            if ($candidate !== '') {
-                $gtin = $candidate;
-                break;
+        $sources = $combination ? array($combination, $row) : array($row);
+        foreach ($sources as $source) {
+            foreach (array('ean13', 'upc', 'isbn') as $key) {
+                $candidate = isset($source[$key]) ? preg_replace('/\s+/', '', (string) $source[$key]) : '';
+                if ($candidate !== '') {
+                    $gtin = $candidate;
+                    break 2;
+                }
             }
         }
-        $price = number_format((float) $row['price'], 2, '.', '');
-        if ($currency !== '') {
-            $price .= ' ' . $currency;
-        }
-        $qty = StockAvailable::getQuantityAvailableByProduct((int) $row['id_product'], 0, $idShop);
+        $mpn = $combination && trim((string) $combination['mpn']) !== '' ? (string) $combination['mpn'] : (isset($row['mpn']) ? (string) $row['mpn'] : '');
+        // Final price with tax, with the combination impact; the regular price ignores specific prices.
+        $regular = (float) Product::getPriceStatic($idProduct, true, $idPa ? $idPa : null, 2, null, false, false);
+        $final = (float) Product::getPriceStatic($idProduct, true, $idPa ? $idPa : null, 2, null, false, true);
+        $suffix = $currency !== '' ? ' ' . $currency : '';
+        $price = number_format($regular, 2, '.', '') . $suffix;
+        $salePrice = ($final < $regular) ? number_format($final, 2, '.', '') . $suffix : '';
+        $qty = StockAvailable::getQuantityAvailableByProduct($idProduct, $idPa, $idShop);
         $link = (string) $this->context->link->getProductLink(
-            (int) $row['id_product'],
+            $idProduct,
             $row['link_rewrite'],
             null,
             null,
             $idLang,
-            $idShop
+            $idShop,
+            $idPa
         );
-        if ($source !== '' && $medium !== '' && $campaign !== '' && $link !== '') {
-            $built = WeaduFeedAudit::buildUtmUrl(array(
-                'url' => $link,
-                'source' => $source,
-                'medium' => $medium,
-                'campaign' => $campaign,
-            ));
-            if ($built['ok']) {
-                $link = $built['url'];
-            }
-        }
         $image = '';
-        $cover = Image::getCover((int) $row['id_product']);
+        $cover = Image::getCover($idProduct);
         if (is_array($cover) && !empty($cover['id_image'])) {
             $image = (string) $this->context->link->getImageLink($row['link_rewrite'], (int) $cover['id_image']);
             $image = $this->absoluteUrl($image);
         }
         return array(
             'id' => $id,
-            'title' => (string) $row['name'],
+            'item_group_id' => $combination ? (string) $idProduct : '',
+            'title' => $title,
             'description' => $description,
             'link' => $link,
             'image_link' => $image,
             'availability' => ((int) $qty) > 0 ? 'in_stock' : 'out_of_stock',
             'price' => $price,
+            'sale_price' => $salePrice,
             'brand' => isset($row['brand']) ? (string) $row['brand'] : '',
             'gtin' => $gtin,
-            'mpn' => isset($row['mpn']) ? (string) $row['mpn'] : '',
+            'mpn' => $mpn,
             'condition' => isset($row['condition']) ? (string) $row['condition'] : 'new',
             'identifier_exists' => '',
+            'edit_link' => $this->editLink($idProduct),
         );
+    }
+
+    private function editLink($idProduct)
+    {
+        $params = array('id_product' => (int) $idProduct, 'updateproduct' => 1);
+        return (string) $this->context->link->getAdminLink('AdminProducts', true, $params, $params);
     }
 
     private function absoluteUrl($url)
@@ -218,19 +259,14 @@ class Weadushoppingfeed extends Module
 
     private function renderPage($report)
     {
-        $source = $this->e(Configuration::get('WEADU_SF_SOURCE'));
-        $medium = $this->e(Configuration::get('WEADU_SF_MEDIUM'));
-        $campaign = $this->e(Configuration::get('WEADU_SF_CAMPAIGN'));
         $limit = (int) Configuration::get('WEADU_SF_LIMIT');
         if ($limit < 1) {
             $limit = 200;
         }
         $html = '<div class="panel"><h3>WeAdU Shopping feed check</h3>';
-        $html .= '<p>' . $this->e($this->t('The check runs in this back office. It does not call Google. Price is the shop base price, tax excluded, without combinations or specific prices. Availability follows the current shop quantity. The id is the reference, or the product id when the reference is empty.')) . '</p>';
+        $html .= '<p>' . $this->e($this->t('The check runs in this back office. It does not call Google. Each combination is checked as its own item. Prices include tax: price is the regular price, sale price is the price after specific prices. Availability follows the current shop quantity.')) . '</p>';
+        $html .= '<div class="alert alert-info">' . $this->e($this->t('Product links are checked without UTM parameters. Google advises against UTM parameters in feed links. To track Google Ads clicks, keep auto-tagging on and set a tracking template in Google Ads.')) . '</div>';
         $html .= '<form method="post" action="' . $this->e($this->actionUrl()) . '">';
-        $html .= $this->input('weadu_source', 'utm_source', $source);
-        $html .= $this->input('weadu_medium', 'utm_medium', $medium);
-        $html .= $this->input('weadu_campaign', 'utm_campaign', $campaign);
         $html .= $this->input('weadu_limit', $this->t('Product limit (max 500)'), $this->e((string) $limit));
         $html .= '<button class="btn btn-default" type="submit" name="submitWeaduFeedSettings">' . $this->e($this->t('Save settings')) . '</button> ';
         $html .= '<button class="btn btn-primary" type="submit" name="submitWeaduFeedCheck">' . $this->e($this->t('Run check')) . '</button>';
@@ -246,22 +282,27 @@ class Weadushoppingfeed extends Module
         $iso = $this->iso();
         $counts = $report['counts'];
         $html = '<div class="panel"><h3>' . $this->e($this->t('Result')) . '</h3>';
-        $html .= '<p>' . (int) $counts['items'] . ' ' . $this->e($this->t('products')) . ', '
+        $html .= '<p>' . (int) $counts['items'] . ' ' . $this->e($this->t('items')) . ', '
             . (int) $counts['errors'] . ' ' . $this->e($this->t('errors')) . ', '
             . (int) $counts['warnings'] . ' ' . $this->e($this->t('warnings')) . '.</p>';
         foreach ($report['errors'] as $error) {
             $html .= '<p>' . $this->e(WeaduFeedAudit::label($error['code'], $iso)) . '</p>';
         }
         $html .= '<table class="table"><thead><tr><th>id</th><th>' . $this->e($this->t('Title')) . '</th><th>'
-            . $this->e($this->t('Findings')) . '</th><th>' . $this->e($this->t('Suggested title')) . '</th></tr></thead><tbody>';
-        foreach ($report['items'] as $item) {
+            . $this->e($this->t('Price (tax incl.)')) . '</th><th>'
+            . $this->e($this->t('Findings')) . '</th><th>' . $this->e($this->t('Suggested title')) . '</th><th></th></tr></thead><tbody>';
+        foreach ($report['items'] as $i => $item) {
             $findings = array();
             foreach ($item['findings'] as $row) {
                 $findings[] = $row['severity'] . ': ' . WeaduFeedAudit::label($row['code'], $iso);
             }
+            $extra = isset($report['extra'][$i]) ? $report['extra'][$i] : array('price' => '', 'sale_price' => '', 'edit_link' => '');
+            $price = $extra['price'] . ($extra['sale_price'] !== '' ? ' / ' . $this->t('sale') . ' ' . $extra['sale_price'] : '');
+            $edit = $extra['edit_link'] !== '' ? '<a href="' . $this->e($extra['edit_link']) . '">' . $this->e($this->t('Edit')) . '</a>' : '';
             $html .= '<tr><td>' . $this->e($item['id']) . '</td><td>' . $this->e($item['title']) . '</td><td>'
+                . $this->e($price) . '</td><td>'
                 . $this->e($findings ? implode('; ', $findings) : $this->t('No finding')) . '</td><td>'
-                . $this->e($item['suggestedTitle']) . '</td></tr>';
+                . $this->e($item['suggestedTitle']) . '</td><td>' . $edit . '</td></tr>';
         }
         $html .= '</tbody></table>';
         $csv = WeaduFeedAudit::toCsv($report);
@@ -280,10 +321,11 @@ class Weadushoppingfeed extends Module
 
     private function actionUrl()
     {
-        return $this->context->link->getAdminLink('AdminModules', true)
-            . '&configure=' . $this->name
-            . '&tab_module=' . $this->tab
-            . '&module_name=' . $this->name;
+        return $this->context->link->getAdminLink('AdminModules', true, array(), array(
+            'configure' => $this->name,
+            'tab_module' => $this->tab,
+            'module_name' => $this->name,
+        ));
     }
 
     private function alert($kind, $text)
@@ -308,30 +350,10 @@ class Weadushoppingfeed extends Module
         return 'en';
     }
 
+    // Native PrestaShop translations (translations/fr.php), editable in the back office.
     private function t($english)
     {
-        if (strpos($this->iso(), 'fr') !== 0) {
-            return $english;
-        }
-        $fr = array(
-            'Remove the saved UTM settings?' => 'Supprimer les réglages UTM enregistrés ?',
-            'UTM values were not saved. Use letters, digits, and . _ ~ - with no spaces.' => 'Valeurs UTM non enregistrées. Lettres, chiffres, et . _ ~ - , sans espace.',
-            'Settings saved.' => 'Réglages enregistrés.',
-            'The check runs in this back office. It does not call Google. Price is the shop base price, tax excluded, without combinations or specific prices. Availability follows the current shop quantity. The id is the reference, or the product id when the reference is empty.' => 'Le contrôle tourne dans ce back-office. Il n\'appelle pas Google. Le prix est le prix de base de la boutique, hors taxes, sans déclinaison ni prix spécifique. La disponibilité suit la quantité de la boutique courante. L\'identifiant est la référence, ou l\'id produit si la référence est vide.',
-            'Product limit (max 500)' => 'Nombre de produits (max 500)',
-            'Save settings' => 'Enregistrer',
-            'Run check' => 'Lancer le contrôle',
-            'Result' => 'Résultat',
-            'products' => 'produits',
-            'errors' => 'erreurs',
-            'warnings' => 'avertissements',
-            'Title' => 'Titre',
-            'Findings' => 'Constats',
-            'Suggested title' => 'Titre proposé',
-            'No finding' => 'Aucun constat',
-            'Download CSV' => 'Télécharger le CSV',
-        );
-        return isset($fr[$english]) ? $fr[$english] : $english;
+        return html_entity_decode($this->l($english, 'weadushoppingfeed'), ENT_QUOTES, 'UTF-8');
     }
 
     private function e($value)
