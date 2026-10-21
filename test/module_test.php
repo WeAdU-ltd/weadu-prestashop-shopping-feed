@@ -210,7 +210,7 @@ $_POST = array('submitWeaduFeedCheck' => '1');
 $module->getContent();
 $sql = Db::getInstance()->queries[count(Db::getInstance()->queries) - 1];
 check('missing columns are replaced by empty values', contains($sql, "'' AS isbn") && contains($sql, "'' AS mpn"));
-todo("fallback alias 'new' AS condition is a MySQL reserved word and needs backticks", contains($sql, "'new' AS condition"));
+check('fallback condition alias is backticked (MySQL reserved word)', contains($sql, "'new' AS `condition`"));
 
 // --- French back office ------------------------------------------------------
 $module = fresh();
