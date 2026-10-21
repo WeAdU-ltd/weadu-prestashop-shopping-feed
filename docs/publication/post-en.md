@@ -14,12 +14,12 @@ I'd like to share a free module that checks, in the back office, the catalogue f
 - Reads the active products of the shop (200 by default, 500 at most).
 - Flags per product: empty title, description, link, image, availability, or price; title over 150 characters; price of zero; GTIN with a wrong check digit; duplicate reference. As warnings: short or all-capitals title, promotional wording, price without currency, empty brand, empty GTIN and MPN.
 - Suggests a title that starts with the brand when the brand is missing.
-- Optionally adds your UTM parameters to the links it checks.
+- Checks each combination, with tax-included and sale prices, and an edit link per product.
 - Exports the result as CSV.
 
 **What it does not do**
 - It does not modify your products and sends nothing to Google or anywhere else.
-- The price checked is the base price, tax excluded, without combinations or specific prices.
+- The price checked is the tax-included price of each combination, with the sale price when a specific price applies (computed for the default customer group).
 - A product with no finding is not an approval from Google.
 
 **Installation**: Modules → Module Manager → Upload a module → select the attached ZIP, then "Configure".
