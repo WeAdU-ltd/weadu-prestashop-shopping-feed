@@ -19,7 +19,7 @@ class Weadushoppingfeed extends Module
     {
         $this->name = 'weadushoppingfeed';
         $this->tab = 'administration';
-        $this->version = '1.1.0';
+        $this->version = '1.2.0';
         $this->author = 'WeAdU';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -32,12 +32,14 @@ class Weadushoppingfeed extends Module
     public function install()
     {
         return parent::install()
-            && Configuration::updateValue('WEADU_SF_LIMIT', '200');
+            && Configuration::updateValue('WEADU_SF_LIMIT', '200')
+            && Configuration::updateValue('WEADU_SF_TAX', 'included');
     }
 
     public function uninstall()
     {
         Configuration::deleteByName('WEADU_SF_LIMIT');
+        Configuration::deleteByName('WEADU_SF_TAX');
         // Settings from 1.0.0, removed with the UTM option.
         Configuration::deleteByName('WEADU_SF_SOURCE');
         Configuration::deleteByName('WEADU_SF_MEDIUM');
@@ -67,7 +69,12 @@ class Weadushoppingfeed extends Module
         if ($limit > 500) {
             $limit = 500;
         }
+        $tax = (string) Tools::getValue('weadu_tax');
+        if ($tax !== 'excluded') {
+            $tax = 'included';
+        }
         Configuration::updateValue('WEADU_SF_LIMIT', (string) $limit);
+        Configuration::updateValue('WEADU_SF_TAX', $tax);
         return $this->alert('success', $this->t('Settings saved.'));
     }
 
@@ -77,8 +84,16 @@ class Weadushoppingfeed extends Module
         if ($limit < 1 || $limit > 500) {
             $limit = 200;
         }
-        $items = $this->collectItems($limit);
+        $withTax = $this->taxMode() !== 'excluded';
+        $idShop = (int) $this->context->shop->id;
+        $total = $this->countAuditItems($idShop);
+        $items = $this->collectItems($limit, $withTax);
         $report = WeaduFeedAudit::auditItems($items, $limit);
+        $checked = count($items);
+        $report['total'] = $total;
+        $report['limit'] = $limit;
+        $report['unread'] = $total === null ? null : max(0, $total - $checked);
+        $report['tax_mode'] = $withTax ? 'included' : 'excluded';
         $report['extra'] = array();
         foreach ($items as $i => $item) {
             $report['extra'][$i] = array(
@@ -90,7 +105,7 @@ class Weadushoppingfeed extends Module
         return $report;
     }
 
-    private function collectItems($limit)
+    private function collectItems($limit, $withTax)
     {
         $idLang = (int) $this->context->language->id;
         $idShop = (int) $this->context->shop->id;
@@ -99,6 +114,7 @@ class Weadushoppingfeed extends Module
         $mpn = $this->columnExists('product', 'mpn') ? 'p.mpn' : "'' AS mpn";
         $condition = $this->columnExists('product', 'condition') ? 'p.`condition`' : "'new' AS `condition`";
         $sql = 'SELECT p.id_product, p.reference, p.ean13, p.upc, ' . $isbn . ', ' . $mpn . ', ' . $condition . ',
+                ps.price AS shop_price, ps.ecotax AS shop_ecotax,
                 pl.name, pl.description, pl.description_short, pl.link_rewrite, m.name AS brand
             FROM `' . $prefix . 'product` p
             INNER JOIN `' . $prefix . 'product_shop` ps
@@ -128,7 +144,7 @@ class Weadushoppingfeed extends Module
                 if (count($items) >= $limit) {
                     return $items;
                 }
-                $items[] = $this->mapRow($row, $combination, $currency, $idLang, $idShop);
+                $items[] = $this->mapRow($row, $combination, $currency, $idLang, $idShop, $withTax);
             }
         }
         return $items;
@@ -141,6 +157,7 @@ class Weadushoppingfeed extends Module
         $isbn = $this->columnExists('product_attribute', 'isbn') ? 'pa.isbn' : "'' AS isbn";
         $mpn = $this->columnExists('product_attribute', 'mpn') ? 'pa.mpn' : "'' AS mpn";
         $sql = 'SELECT pa.id_product_attribute, pa.reference, pa.ean13, pa.upc, ' . $isbn . ', ' . $mpn . ',
+                pas.price AS impact, pas.ecotax AS combination_ecotax,
                 GROUP_CONCAT(al.name ORDER BY ag.position, a.position SEPARATOR \', \') AS attributes
             FROM `' . $prefix . 'product_attribute` pa
             INNER JOIN `' . $prefix . 'product_attribute_shop` pas
@@ -160,7 +177,7 @@ class Weadushoppingfeed extends Module
         return is_array($rows) ? $rows : array();
     }
 
-    private function mapRow($row, $combination, $currency, $idLang, $idShop)
+    private function mapRow($row, $combination, $currency, $idLang, $idShop, $withTax = true)
     {
         $idProduct = (int) $row['id_product'];
         $idPa = $combination ? (int) $combination['id_product_attribute'] : 0;
@@ -196,12 +213,10 @@ class Weadushoppingfeed extends Module
             }
         }
         $mpn = $combination && trim((string) $combination['mpn']) !== '' ? (string) $combination['mpn'] : (isset($row['mpn']) ? (string) $row['mpn'] : '');
-        // Final price with tax, with the combination impact; the regular price ignores specific prices.
-        $regular = (float) Product::getPriceStatic($idProduct, true, $idPa ? $idPa : null, 2, null, false, false);
-        $final = (float) Product::getPriceStatic($idProduct, true, $idPa ? $idPa : null, 2, null, false, true);
+        $priced = $this->pricesOf($idProduct, $idPa, $withTax, $row, $combination);
         $suffix = $currency !== '' ? ' ' . $currency : '';
-        $price = number_format($regular, 2, '.', '') . $suffix;
-        $salePrice = ($final < $regular) ? number_format($final, 2, '.', '') . $suffix : '';
+        $price = number_format($priced['regular'], 2, '.', '') . $suffix;
+        $salePrice = $priced['sale'] === null ? '' : number_format($priced['sale'], 2, '.', '') . $suffix;
         $qty = StockAvailable::getQuantityAvailableByProduct($idProduct, $idPa, $idShop);
         $link = (string) $this->context->link->getProductLink(
             $idProduct,
@@ -251,6 +266,85 @@ class Weadushoppingfeed extends Module
         return (int) Db::getInstance()->getValue($sql);
     }
 
+    /**
+     * Regular price is the catalogue price. Sale price is what the customer pays when it is lower.
+     * A fixed specific price (specific_price.price >= 0) replaces the catalogue price inside
+     * Product::getPriceStatic even when reductions are turned off, so both calls would hide the sale.
+     * In that case the catalogue price is rebuilt from the shop price and the combination impact.
+     */
+    private function pricesOf($idProduct, $idPa, $withTax, array $row, $combination)
+    {
+        $pa = $idPa ? $idPa : null;
+        $specific = null;
+        $final = (float) Product::getPriceStatic($idProduct, $withTax, $pa, 2, null, false, true, 1, false, null, null, null, $specific);
+        $fixed = is_array($specific) && isset($specific['price']) && (float) $specific['price'] >= 0;
+        if ($fixed) {
+            $again = null;
+            $final = (float) Product::getPriceStatic($idProduct, $withTax, $pa, 2, null, false, true, 1, false, null, null, null, $again, true, false);
+            $impact = ($combination && isset($combination['impact'])) ? (float) $combination['impact'] : 0.0;
+            $shop = isset($row['shop_price']) ? (float) $row['shop_price'] : 0.0;
+            $ecotax = isset($row['shop_ecotax']) ? (float) $row['shop_ecotax'] : 0.0;
+            if ($combination && isset($combination['combination_ecotax']) && (float) $combination['combination_ecotax'] > 0) {
+                $ecotax = (float) $combination['combination_ecotax'];
+            }
+            $catalog = $this->applyTax($idProduct, $shop + $impact, $withTax) + $this->applyTax($idProduct, $ecotax, $withTax);
+        } else {
+            $catalog = (float) Product::getPriceStatic($idProduct, $withTax, $pa, 2, null, false, false);
+        }
+        $catalog = round($catalog, 2);
+        $final = round($final, 2);
+        return array(
+            'regular' => $final < $catalog ? $catalog : $final,
+            'sale' => $final < $catalog ? $final : null,
+        );
+    }
+
+    private function applyTax($idProduct, $amount, $withTax)
+    {
+        $amount = (float) $amount;
+        if ($withTax && class_exists('Tax') && is_callable(array('Tax', 'getProductTaxRate'))) {
+            $rate = (float) Tax::getProductTaxRate((int) $idProduct);
+            $amount = $amount * (1 + ($rate / 100));
+        }
+        return round($amount, 2);
+    }
+
+    // Rows the check would emit: one per combination, or one per product when it has none.
+    private function countAuditItems($idShop)
+    {
+        $idShop = (int) $idShop;
+        $prefix = _DB_PREFIX_;
+        $sql = 'SELECT (
+                SELECT COUNT(*)
+                FROM `' . $prefix . 'product` p
+                INNER JOIN `' . $prefix . 'product_shop` ps
+                    ON ps.id_product = p.id_product AND ps.id_shop = ' . $idShop . ' AND ps.active = 1
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM `' . $prefix . 'product_attribute` pa
+                    INNER JOIN `' . $prefix . 'product_attribute_shop` pas
+                        ON pas.id_product_attribute = pa.id_product_attribute AND pas.id_shop = ' . $idShop . '
+                    WHERE pa.id_product = p.id_product
+                )
+            ) + (
+                SELECT COUNT(*)
+                FROM `' . $prefix . 'product_attribute` pa
+                INNER JOIN `' . $prefix . 'product_attribute_shop` pas
+                    ON pas.id_product_attribute = pa.id_product_attribute AND pas.id_shop = ' . $idShop . '
+                INNER JOIN `' . $prefix . 'product_shop` ps
+                    ON ps.id_product = pa.id_product AND ps.id_shop = ' . $idShop . ' AND ps.active = 1
+            ) AS audit_total';
+        $value = Db::getInstance()->getValue($sql);
+        if ($value === false || $value === null || $value === '') {
+            return null;
+        }
+        return (int) $value;
+    }
+
+    private function taxMode()
+    {
+        return (string) Configuration::get('WEADU_SF_TAX') === 'excluded' ? 'excluded' : 'included';
+    }
+
     private function editLink($idProduct)
     {
         $params = array('id_product' => (int) $idProduct, 'updateproduct' => 1);
@@ -277,11 +371,14 @@ class Weadushoppingfeed extends Module
         if ($limit < 1) {
             $limit = 200;
         }
+        $tax = $this->taxMode();
         $html = '<div class="panel"><h3>WeAdU Shopping feed check</h3>';
-        $html .= '<p>' . $this->e($this->t('The check runs in this back office. It does not call Google. Each combination is checked as its own item. Prices include tax: price is the regular price, sale price is the price after specific prices. Availability follows the current shop quantity.')) . '</p>';
+        $html .= '<p>' . $this->e($this->t('The check runs in this back office. It does not call Google. Each combination is checked as its own item. The regular price is the catalogue price. A sale price is shown when the customer pays less, including when a specific price sets a fixed amount. Availability follows the current shop quantity.')) . '</p>';
         $html .= '<div class="alert alert-info">' . $this->e($this->t('Product links are checked without UTM parameters. Google advises against UTM parameters in feed links. To track Google Ads clicks, keep auto-tagging on and set a tracking template in Google Ads.')) . '</div>';
+        $html .= $this->taxWarning($tax);
         $html .= '<form method="post" action="' . $this->e($this->actionUrl()) . '">';
-        $html .= $this->input('weadu_limit', $this->t('Product limit (max 500)'), $this->e((string) $limit));
+        $html .= $this->input('weadu_limit', $this->t('Item limit, combinations included (max 500)'), $this->e((string) $limit));
+        $html .= $this->selectTax($tax);
         $html .= '<button class="btn btn-default" type="submit" name="submitWeaduFeedSettings">' . $this->e($this->t('Save settings')) . '</button> ';
         $html .= '<button class="btn btn-primary" type="submit" name="submitWeaduFeedCheck">' . $this->e($this->t('Run check')) . '</button>';
         $html .= '</form></div>';
@@ -296,14 +393,18 @@ class Weadushoppingfeed extends Module
         $iso = $this->iso();
         $counts = $report['counts'];
         $html = '<div class="panel"><h3>' . $this->e($this->t('Result')) . '</h3>';
+        $html .= $this->unreadWarning($report);
         $html .= '<p>' . (int) $counts['items'] . ' ' . $this->e($this->t('items')) . ', '
             . (int) $counts['errors'] . ' ' . $this->e($this->t('errors')) . ', '
             . (int) $counts['warnings'] . ' ' . $this->e($this->t('warnings')) . '.</p>';
         foreach ($report['errors'] as $error) {
             $html .= '<p>' . $this->e(WeaduFeedAudit::label($error['code'], $iso)) . '</p>';
         }
+        $priceLabel = (isset($report['tax_mode']) && $report['tax_mode'] === 'excluded')
+            ? $this->t('Price (tax excl.)')
+            : $this->t('Price (tax incl.)');
         $html .= '<table class="table"><thead><tr><th>id</th><th>' . $this->e($this->t('Title')) . '</th><th>'
-            . $this->e($this->t('Price (tax incl.)')) . '</th><th>'
+            . $this->e($priceLabel) . '</th><th>'
             . $this->e($this->t('Findings')) . '</th><th>' . $this->e($this->t('Suggested title')) . '</th><th></th></tr></thead><tbody>';
         foreach ($report['items'] as $i => $item) {
             $findings = array();
@@ -325,6 +426,50 @@ class Weadushoppingfeed extends Module
         $html .= '<textarea class="form-control" rows="8" readonly="readonly">' . $this->e($csv) . '</textarea>';
         $html .= '</div>';
         return $html;
+    }
+
+    private function taxWarning($tax)
+    {
+        if ($tax === 'excluded') {
+            $text = $this->t('Prices exclude tax, as required for a United States or Canada feed. Most other countries require tax-included prices.');
+        } else {
+            $text = $this->t('Prices include tax. A feed for the United States or Canada must use tax-excluded prices: choose Tax excluded. This check does not calculate US or Canadian sales tax.');
+        }
+        return '<div class="alert alert-warning">' . $this->e($text) . '</div>';
+    }
+
+    private function selectTax($mode)
+    {
+        $included = $mode === 'included' ? ' selected="selected"' : '';
+        $excluded = $mode === 'excluded' ? ' selected="selected"' : '';
+        return '<div class="form-group"><label for="weadu_tax">' . $this->e($this->t('Price tax')) . '</label>'
+            . '<select class="form-control" id="weadu_tax" name="weadu_tax">'
+            . '<option value="included"' . $included . '>' . $this->e($this->t('Tax included')) . '</option>'
+            . '<option value="excluded"' . $excluded . '>' . $this->e($this->t('Tax excluded')) . '</option>'
+            . '</select></div>';
+    }
+
+    private function unreadWarning(array $report)
+    {
+        $checked = isset($report['items']) ? count($report['items']) : 0;
+        $limit = isset($report['limit']) ? (int) $report['limit'] : 0;
+        if (isset($report['unread']) && $report['unread'] !== null && (int) $report['unread'] > 0) {
+            $text = sprintf(
+                $this->t('Not read: %d (checked %d of %d). This result does not cover the whole catalogue. The CSV lists only the rows below.'),
+                (int) $report['unread'],
+                (int) $checked,
+                (int) $report['total']
+            );
+            return '<div class="alert alert-warning">' . $this->e($text) . '</div>';
+        }
+        if ((!isset($report['total']) || $report['total'] === null) && $limit > 0 && $checked >= $limit) {
+            $text = sprintf(
+                $this->t('The limit of %d items was reached. Further items were not read, and the catalogue total could not be counted.'),
+                $limit
+            );
+            return '<div class="alert alert-warning">' . $this->e($text) . '</div>';
+        }
+        return '';
     }
 
     private function input($name, $label, $value)

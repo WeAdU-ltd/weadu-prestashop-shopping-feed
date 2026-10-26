@@ -1,5 +1,5 @@
-# Copy this file to .github/workflows/test.yml to run the tests on GitHub Actions.
-# It is kept here because the token that opened this pull request cannot write workflow files.
+# Same workflow as .github/workflows/test.yml.
+# `sh test.sh` runs the PHP checks and `node --test test/*.js` (a directory argument fails on Node 22).
 
 name: tests
 
