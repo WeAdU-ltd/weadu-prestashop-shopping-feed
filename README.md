@@ -68,7 +68,7 @@ Compatibility declared by the module: PrestaShop 1.7.8 or later.
 | Item limit | 200 | Between 1 and 500. Combinations count as items. Above the limit, the page states how many items were not read. |
 | Price tax | Tax included | Tax excluded is for a United States or Canada feed. |
 
-Uninstalling the module deletes this setting (and the UTM settings of version 1.0.0, if any).
+Uninstalling the module deletes these settings (and the UTM settings of version 1.0.0, if any).
 
 ## Privacy
 
