@@ -3,7 +3,7 @@
 set -eu
 cd "$(dirname "$0")"
 find . -name "*.php" -not -path "./.git/*" -print0 | xargs -0 -n1 php -l >/dev/null
-node --test test/
+node --test test/*.js
 php test/csv_test.php
 php test/module_test.php
 for f in $(find weadushoppingfeed -name "*.php"); do grep -q "@license   https://opensource.org/licenses/AFL-3.0" "$f" || { echo "missing license header: $f"; exit 1; }; done

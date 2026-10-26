@@ -35,9 +35,13 @@ class Db
     public $combos = array();
     public $comboQueries = array();
     public $comboImages = array();
+    public $auditTotal = null;
     public function getValue($sql)
     {
         $this->queries[] = $sql;
+        if (stripos($sql, 'AS audit_total') !== false) {
+            return $this->auditTotal;
+        }
         if (preg_match('/product_attribute_image.*id_product_attribute = (\\d+)/s', $sql, $m)) {
             return isset($this->comboImages[(int) $m[1]]) ? $this->comboImages[(int) $m[1]] : false;
         }
@@ -139,14 +143,30 @@ class Module
     }
 }
 
+class Tax
+{
+    public static $rate = 0;
+    public static function getProductTaxRate($id, $address = null, $context = null)
+    {
+        return self::$rate;
+    }
+}
+
 class Product
 {
     public static $prices = array();
     public static $calls = array();
-    public static function getPriceStatic($id, $tax = true, $pa = null, $decimals = 6, $divisor = null, $onlyReduc = false, $usereduc = true)
+    public static function getPriceStatic($id, $tax = true, $pa = null, $decimals = 6, $divisor = null, $onlyReduc = false, $usereduc = true, $quantity = 1, $force = false, $idCustomer = null, $idCart = null, $idAddress = null, &$specific = null, $withEcotax = true, $useGroup = true)
     {
         self::$calls[] = array($id, $tax, $pa, $usereduc);
         $p = isset(self::$prices[$id . '-' . (int) $pa]) ? self::$prices[$id . '-' . (int) $pa] : array(0, 0);
+        // A third value is a fixed specific price. PrestaShop then returns that selling
+        // price from both calls, and the catalogue price has to be rebuilt by the module.
+        if (array_key_exists(2, $p)) {
+            $specific = array('price' => $p[2]);
+            return $p[1];
+        }
+        $specific = null;
         return $usereduc ? $p[1] : $p[0];
     }
 }
@@ -175,6 +195,7 @@ check('module source makes no outbound HTTP call', !preg_match('/curl_|file_get_
 Configuration::$values = array();
 check('install succeeds', $module->install() === true);
 check('install stores the default limit', Configuration::get('WEADU_SF_LIMIT') === '200');
+check('install stores tax included by default', Configuration::get('WEADU_SF_TAX') === 'included');
 check('install stores no UTM setting', Configuration::get('WEADU_SF_SOURCE') === false);
 Configuration::$values['WEADU_SF_SOURCE'] = 'old';
 check('uninstall succeeds', $module->uninstall() === true);
@@ -188,6 +209,8 @@ check('page shows the settings form', contains($html, 'name="weadu_limit"') && c
 check('page has no UTM field', !contains($html, 'weadu_source') && !contains($html, 'utm_source'));
 check('page warns about UTM in feed links and points to the tracking template', contains($html, 'Google advises against UTM parameters in feed links') && contains($html, 'tracking template'));
 check('page says it does not call Google', contains($html, 'It does not call Google.'));
+check('page warns that tax-included prices are wrong for the United States or Canada', contains($html, 'United States or Canada') && contains($html, 'choose Tax excluded'));
+check('page can switch to tax-excluded prices', contains($html, 'name="weadu_tax"') && contains($html, 'value="excluded"'));
 $calls = Context::getContext()->link->adminCalls;
 check('form action uses getAdminLink parameters', $calls[0][0] === 'AdminModules' && $calls[0][2]['configure'] === 'weadushoppingfeed' && $calls[0][2]['module_name'] === 'weadushoppingfeed');
 
@@ -200,6 +223,13 @@ $module = fresh();
 $_POST = array('submitWeaduFeedSettings' => '1', 'weadu_limit' => '0');
 $module->getContent();
 check('limit 0 falls back to 200', Configuration::get('WEADU_SF_LIMIT') === '200');
+$module = fresh();
+$_POST = array('submitWeaduFeedSettings' => '1', 'weadu_limit' => '10', 'weadu_tax' => 'excluded');
+$module->getContent();
+check('tax excluded is saved', Configuration::get('WEADU_SF_TAX') === 'excluded');
+$_POST = array('submitWeaduFeedSettings' => '1', 'weadu_limit' => '10', 'weadu_tax' => 'nope');
+$module->getContent();
+check('unknown tax mode falls back to included', Configuration::get('WEADU_SF_TAX') === 'included');
 
 // --- run the check: a simple product, a product with two combinations, a broken one
 Configuration::$values = array('WEADU_SF_LIMIT' => '50');
@@ -227,6 +257,7 @@ foreach ($queries as $q) { if (contains($q, 'FROM `ps_product` p')) { $sql = $q;
 check('query is limited to the saved limit', contains($sql, 'LIMIT 50'));
 check('query reads the current shop and language', contains($sql, 'ps.id_shop = 1') && contains($sql, 'pl.id_lang = 1'));
 check('query reads active products only', contains($sql, 'ps.active = 1'));
+check('query reads the shop price used when a specific price is fixed', contains($sql, 'ps.price AS shop_price'));
 check('combinations are read per product in the current shop', count(Db::getInstance()->comboQueries) === 3 && contains(Db::getInstance()->comboQueries[2], 'pas.id_shop = 1'));
 check('summary counts items (one per combination)', contains($html, '4 items,'), strip_tags(substr($html, strpos($html, 'Result'), 120)));
 check('clean product shows no finding', contains($html, '<td>SHIRT-1</td><td>Acme Cotton Shirt</td><td>34.80 EUR</td><td>No finding</td>'));
@@ -269,6 +300,33 @@ check('combination MPN wins, product GTIN is the fallback (none here)', $c8['mpn
 $cx = $map->invoke($module, $rows[2], array('id_product_attribute' => 9, 'reference' => 'TEE', 'ean13' => '', 'upc' => '', 'isbn' => '', 'mpn' => '', 'attributes' => 'L'), 'EUR', 1, 1);
 check('combination reference equal to the product reference is made unique', $cx['id'] === 'TEE-9', $cx['id']);
 
+Tax::$rate = 20;
+Product::$prices['6-0'] = array(19.2, 19.2, 16);
+$rowFixed = array(
+    'id_product' => 6, 'reference' => 'FIX', 'ean13' => '4006381333931', 'upc' => '', 'isbn' => '', 'mpn' => '', 'condition' => 'new',
+    'shop_price' => '20.000000', 'shop_ecotax' => '0.000000',
+    'name' => 'Acme Fixed Price Mug', 'description' => 'A ceramic mug for the office.', 'description_short' => '', 'link_rewrite' => 'mug', 'brand' => 'Acme',
+);
+$fixed = $map->invoke($module, $rowFixed, null, 'EUR', 1, 1, true);
+check('fixed specific price keeps the catalogue price and shows the sale', $fixed['price'] === '24.00 EUR' && $fixed['sale_price'] === '19.20 EUR', $fixed['price'] . ' / ' . $fixed['sale_price']);
+Product::$prices['6-0'] = array(30, 30, 25);
+$higher = $map->invoke($module, $rowFixed, null, 'EUR', 1, 1, true);
+check('a higher fixed price is the selling price, with no sale price', $higher['price'] === '30.00 EUR' && $higher['sale_price'] === '', $higher['price'] . ' / ' . $higher['sale_price']);
+Product::$prices['6-9'] = array(19.2, 19.2, 16);
+$comboFixed = array('id_product_attribute' => 9, 'reference' => 'FIX-S', 'ean13' => '', 'upc' => '', 'isbn' => '', 'mpn' => '', 'attributes' => 'S', 'impact' => '4', 'combination_ecotax' => '0');
+$fixedCombo = $map->invoke($module, $rowFixed, $comboFixed, 'EUR', 1, 1, true);
+check('fixed specific price adds the combination impact before tax', $fixedCombo['price'] === '28.80 EUR' && $fixedCombo['sale_price'] === '19.20 EUR', $fixedCombo['price'] . ' / ' . $fixedCombo['sale_price']);
+$rowEco = $rowFixed;
+$rowEco['shop_ecotax'] = '1.000000';
+Product::$prices['6-0'] = array(19.2, 19.2, 16);
+$eco = $map->invoke($module, $rowEco, null, 'EUR', 1, 1, true);
+check('fixed specific price keeps ecotax on the catalogue price', $eco['price'] === '25.20 EUR' && $eco['sale_price'] === '19.20 EUR', $eco['price']);
+Product::$calls = array();
+Product::$prices['6-0'] = array(16, 16, 16);
+$ht = $map->invoke($module, $rowFixed, null, 'USD', 1, 1, false);
+check('tax-excluded mode keeps the catalogue price without tax', $ht['price'] === '20.00 USD' && $ht['sale_price'] === '16.00 USD' && in_array(array(6, false, null, true), Product::$calls, true), $ht['price'] . ' / ' . $ht['sale_price']);
+Tax::$rate = 0;
+
 // limit counts items, not products
 Configuration::$values = array('WEADU_SF_LIMIT' => '2');
 $m2 = fresh();
@@ -279,7 +337,10 @@ Db::getInstance()->combos = array(4 => array(
     array('id_product_attribute' => 9, 'reference' => 'C', 'ean13' => '', 'upc' => '', 'isbn' => '', 'mpn' => '', 'attributes' => 'L'),
 ));
 $_POST = array('submitWeaduFeedCheck' => '1');
-check('limit caps the number of items', contains($m2->getContent(), '2 items,'));
+Db::getInstance()->auditTotal = 3;
+$limited = $m2->getContent();
+check('limit caps the number of items', contains($limited, '2 items,'));
+check('page says how many items were not read', contains($limited, 'Not read: 1 (checked 2 of 3).'));
 
 // --- older schema without isbn, mpn, condition columns -----------------------
 Configuration::$values = array('WEADU_SF_LIMIT' => '50');
@@ -288,7 +349,12 @@ Db::getInstance()->columns = array();
 Db::getInstance()->rows = array();
 $_POST = array('submitWeaduFeedCheck' => '1');
 $module->getContent();
-$sql = Db::getInstance()->queries[count(Db::getInstance()->queries) - 1];
+$sql = '';
+foreach (Db::getInstance()->queries as $query) {
+    if (contains($query, 'FROM `ps_product` p')) {
+        $sql = $query;
+    }
+}
 check('missing columns are replaced by empty values', contains($sql, "'' AS isbn") && contains($sql, "'' AS mpn"));
 check('fallback condition alias is backticked (MySQL reserved word)', contains($sql, "'new' AS `condition`"));
 
@@ -304,8 +370,10 @@ Product::$prices = array('3-0' => array(19, 19));
 Image::$covers = array(3 => 11);
 StockAvailable::$qty = array(3 => 1);
 $_POST = array('submitWeaduFeedCheck' => '1');
+Db::getInstance()->auditTotal = 4;
 $html = $module->getContent();
 check('French labels come from translations/fr.php', contains($html, 'Lancer le contrôle') && contains($html, 'avertissements') && contains($html, 'Prix TTC'));
+check('French page says how many items were not read', contains($html, 'Non lus : 3 (contrôlés 1 sur 4).'));
 check('French apostrophes are not double-escaped', contains($html, 'Il n&#039;appelle pas Google') && !contains($html, '&amp;#039;'));
 check('French module name', $module->displayName === 'WeAdU Contrôle de flux Shopping');
 check('French finding label', contains($html, 'warning: GTIN et MPN vides.'));
@@ -325,5 +393,11 @@ require __DIR__ . '/../weadushoppingfeed/upgrade/upgrade-1.1.0.php';
 Configuration::$values = array('WEADU_SF_SOURCE' => 'g', 'WEADU_SF_MEDIUM' => 'c', 'WEADU_SF_CAMPAIGN' => 's', 'WEADU_SF_LIMIT' => '120');
 check('upgrade 1.1.0 succeeds', upgrade_module_1_1_0($module) === true);
 check('upgrade 1.1.0 removes the UTM settings and keeps the limit', Configuration::$values === array('WEADU_SF_LIMIT' => '120'));
+
+require __DIR__ . '/../weadushoppingfeed/upgrade/upgrade-1.2.0.php';
+check('upgrade 1.2.0 succeeds', upgrade_module_1_2_0($module) === true);
+check('upgrade 1.2.0 sets tax included and keeps the limit', Configuration::$values === array('WEADU_SF_LIMIT' => '120', 'WEADU_SF_TAX' => 'included'));
+Configuration::$values = array('WEADU_SF_TAX' => 'excluded', 'WEADU_SF_LIMIT' => '10');
+check('upgrade 1.2.0 does not overwrite a saved tax mode', upgrade_module_1_2_0($module) === true && Configuration::get('WEADU_SF_TAX') === 'excluded');
 
 finish();

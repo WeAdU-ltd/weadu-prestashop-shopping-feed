@@ -6,10 +6,12 @@ The check runs in your back office. The module does not call Google or any other
 
 ## Features
 
-- Reads the active products of the current shop, in the back-office language, up to a limit you choose (200 by default, 500 at most).
+- Reads the active products of the current shop, in the back-office language, up to a limit you choose (200 items by default, 500 at most, combinations included).
+- If the catalogue has more items than the limit, the result says how many were not read. The table and the CSV then cover only the rows that were read.
 - Lists each product with its findings (errors and warnings) and a suggested title when the brand is missing from the title.
 - Checks each combination as its own item (title with its attributes, its own reference, GTIN, stock, and link), grouped by product.
-- Prices are tax included, as Google expects in most countries: the regular price, and the sale price when a specific price applies. Specific prices are computed in the back-office context, that is for the default customer group (and the default country and currency): a price reserved to another customer group is not shown.
+- Prices include tax by default, as Google expects in most countries. The regular price is the catalogue price. The sale price is shown when the customer pays less. A specific price that sets a fixed amount no longer replaces the catalogue price in both columns. Choose **Tax excluded** for a United States or Canada feed: Merchant Center requires tax-excluded prices there, and this check does not calculate US or Canadian sales tax.
+- Specific prices are computed in the back-office context, that is for the default customer group (and the default country and currency): a price reserved to another customer group is not shown. For a fixed specific price, the catalogue price is the shop price plus the combination impact (and ecotax), with the product tax rate. It does not apply a customer-group reduction.
 - Each row has an **Edit** link to the product page of the back office.
 - No UTM parameters: Google advises against them in feed links. To track Google Ads clicks, keep auto-tagging on and use a tracking template in Google Ads.
 - Exports the result as a CSV file (download button, and a text area you can copy).
@@ -26,8 +28,8 @@ The check runs in your back office. The module does not call Google or any other
 | `link` | Product URL, or the combination URL |
 | `image_link` | First image of the combination, or the product cover image |
 | `availability` | `in_stock` when the current shop quantity (of the combination) is above zero, otherwise `out_of_stock` |
-| `price` | Regular price, tax included, with the combination impact, in the currency of the context |
-| `sale_price` | Price after specific prices, tax included, when it is lower than the regular price (shown in the table) |
+| `price` | Catalogue price (tax included by default, or tax excluded when that mode is selected). When the customer pays the same or more, this is the price PrestaShop returns. |
+| `sale_price` | Price the customer pays, when it is lower than the catalogue price, including a fixed specific price (shown in the table) |
 | `brand` | Brand (manufacturer) |
 | `gtin` | EAN-13, then UPC, then ISBN (of the combination first, then of the product) |
 | `mpn` | MPN of the combination, or of the product, when the column exists |
@@ -43,7 +45,7 @@ A product with no finding is not an approval from Google: Merchant Center applie
 
 ## En français
 
-Module PrestaShop gratuit qui contrôle les champs du catalogue utilisés par Google Shopping, déclinaison par déclinaison, dans votre back-office, sans appel à Google. Les prix sont TTC : le prix normal, et le prix soldé quand un prix spécifique s'applique. Les prix spécifiques sont calculés dans le contexte du back-office, c'est-à-dire pour le groupe client par défaut (et le pays et la devise par défaut) : un prix réservé à un autre groupe client n'apparaît pas. L'image vérifiée est la première image de la déclinaison, ou à défaut l'image de couverture du produit. Chaque ligne a un lien « Modifier ». Le module n'ajoute pas de paramètres UTM : pour suivre les clics Google Ads, utilisez le marquage automatique et un modèle de suivi dans Google Ads.
+Module PrestaShop gratuit qui contrôle les champs du catalogue utilisés par Google Shopping, déclinaison par déclinaison, dans votre back-office, sans appel à Google. Les prix sont TTC par défaut : le prix catalogue, et le prix soldé quand le client paie moins, y compris si un prix spécifique fixe remplace le prix catalogue. Pour un flux États-Unis ou Canada, choisir le mode hors taxe. Si la limite est atteinte, la page indique combien d'articles n'ont pas été lus. Les prix spécifiques sont calculés dans le contexte du back-office, c'est-à-dire pour le groupe client par défaut (et le pays et la devise par défaut) : un prix réservé à un autre groupe client n'apparaît pas. L'image vérifiée est la première image de la déclinaison, ou à défaut l'image de couverture du produit. Chaque ligne a un lien « Modifier ». Le module n'ajoute pas de paramètres UTM : pour suivre les clics Google Ads, utilisez le marquage automatique et un modèle de suivi dans Google Ads.
 
 ## Installation
 
@@ -55,15 +57,16 @@ Compatibility declared by the module: PrestaShop 1.7.8 or later.
 
 ## Usage
 
-1. Optional: enter a limit (number of items, combinations included), then click **Save settings**.
+1. Optional: enter a limit (number of items, combinations included) and choose tax included or tax excluded, then click **Save settings**.
 2. Click **Run check**.
-3. Read the table, or download the CSV.
+3. Read the table, including the line that says how many items were not read, or download the CSV. The CSV does not repeat that line.
 
 ## Settings
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| Product limit | 200 | Between 1 and 500. |
+| Item limit | 200 | Between 1 and 500. Combinations count as items. Above the limit, the page states how many items were not read. |
+| Price tax | Tax included | Tax excluded is for a United States or Canada feed. |
 
 Uninstalling the module deletes this setting (and the UTM settings of version 1.0.0, if any).
 
